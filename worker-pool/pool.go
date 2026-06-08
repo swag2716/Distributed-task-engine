@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -46,9 +47,57 @@ func NewPool(cfg Config) *Pool {
 		cancel:  cancel,
 	}
 
-	for i := 0; i < cfg.workers; i++ {
-
+	for i := 0; i < cfg.Workers; i++ {
+		pool.wg.Add(1)
+		go pool.Worker()
 	}
 
 	return pool
+}
+
+func (p *Pool) Worker() {
+	defer p.wg.Done()
+
+	for job := range p.jobs {
+		p.RunJob(job)
+	}
+}
+
+func (p *Pool) RunJob(job Job) {
+	start := time.Now()
+	timeout := p.cfg.JobTimeout
+	if job.Timeout > 0 {
+		timeout = job.Timeout
+	}
+
+	var err error
+	var output any
+
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(p.ctx, timeout)
+		defer cancel()
+
+		done := make(chan struct{})
+		go func() {
+			output, err = job.Task(ctx, job.Payload)
+			close(done)
+		}()
+		select {
+		case <-done:
+			fmt.Println("task completed within time")
+		case <-ctx.Done():
+			err = fmt.Errorf("job: %s timout after %v", job.Id, timeout)
+		}
+	}
+
+	select {
+	case p.results <- Result{
+		JobId:   job.Id,
+		Err:     err,
+		Output:  output,
+		Latency: time.Since(start),
+	}:
+	default:
+		fmt.Println("Result channel is full")
+	}
 }
