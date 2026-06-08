@@ -73,21 +73,22 @@ func (p *Pool) RunJob(job Job) {
 	var err error
 	var output any
 
-	if timeout > 0 {
-		ctx, cancel := context.WithTimeout(p.ctx, timeout)
-		defer cancel()
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(p.ctx, timeout)
+	defer cancel()
 
-		done := make(chan struct{})
-		go func() {
-			output, err = job.Task(ctx, job.Payload)
-			close(done)
-		}()
-		select {
-		case <-done:
-			fmt.Println("task completed within time")
-		case <-ctx.Done():
-			err = fmt.Errorf("job: %s timout after %v", job.Id, timeout)
-		}
+	done := make(chan struct{})
+	go func() {
+		output, err = job.Task(ctx, job.Payload)
+		close(done)
+	}()
+	select {
+	case <-done:
+		fmt.Println("task completed within time")
+	case <-ctx.Done():
+		err = fmt.Errorf("job: %s timout after %v", job.Id, timeout)
 	}
 
 	select {
