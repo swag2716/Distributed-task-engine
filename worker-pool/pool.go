@@ -38,7 +38,6 @@ type Pool struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu      sync.Mutex
 	stopped atomic.Bool
 }
 
@@ -113,12 +112,16 @@ var (
 	ErrPoolFull    = errors.New("pool is full")
 )
 
-func (p *Pool) Submit(job Job) error {
-	stopped := p.stopped.Load()
-
-	if stopped {
+func (p *Pool) Submit(job Job) (err error) {
+	if p.stopped.Load() {
 		return ErrPoolStopped
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = ErrPoolStopped
+		}
+	}()
 
 	select {
 	case p.jobs <- job:
@@ -128,12 +131,15 @@ func (p *Pool) Submit(job Job) error {
 	}
 }
 
-func (p *Pool) TrySubmit(job Job) error { //for fast operations, using default in select
-	stopped := p.stopped.Load()
-
-	if stopped {
+func (p *Pool) TrySubmit(job Job) (err error) { //for fast operations, using default in select
+	if p.stopped.Load() {
 		return ErrPoolStopped
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ErrPoolStopped
+		}
+	}()
 	select {
 	case p.jobs <- job:
 		return nil
@@ -142,16 +148,14 @@ func (p *Pool) TrySubmit(job Job) error { //for fast operations, using default i
 	}
 }
 
-func (p *Pool) Result() <-chan Result {
+func (p *Pool) Results() <-chan Result {
 	return p.results
 }
 
 func (p *Pool) Shutdown() {
-	stopped := p.stopped.Load()
-	if stopped == true {
+	if !p.stopped.CompareAndSwap(false, true) {
 		return
 	}
-	p.stopped.Store(true)
 
 	close(p.jobs)    // close jobs channel so no more writes
 	p.wg.Wait()      // wait for all jobs to finish

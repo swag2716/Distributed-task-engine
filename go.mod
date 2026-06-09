@@ -1,3 +1,3 @@
-module github.com/distributed-task-engine
+module github.com/swag2716/distributed-task-engine
 
 go 1.26.3
