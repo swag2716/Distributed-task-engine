@@ -2,8 +2,10 @@ package pool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -35,6 +37,9 @@ type Pool struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	mu      sync.Mutex
+	stopped atomic.Bool
 }
 
 func NewPool(cfg Config) *Pool {
@@ -80,7 +85,7 @@ func (p *Pool) RunJob(job Job) {
 	defer cancel()
 
 	done := make(chan struct{})
-	go func() {
+	go func() { //go routine is used here because we have timeout ans select waits on done channel for which we need go routine
 		output, err = job.Task(ctx, job.Payload)
 		close(done)
 	}()
@@ -91,7 +96,7 @@ func (p *Pool) RunJob(job Job) {
 		err = fmt.Errorf("job: %s timout after %v", job.Id, timeout)
 	}
 
-	select {
+	select { //non-blocking select as default will be executed instantly if result channel is full
 	case p.results <- Result{
 		JobId:   job.Id,
 		Err:     err,
@@ -101,4 +106,55 @@ func (p *Pool) RunJob(job Job) {
 	default:
 		fmt.Println("Result channel is full")
 	}
+}
+
+var (
+	ErrPoolStopped = errors.New("pool is stopped")
+	ErrPoolFull    = errors.New("pool is full")
+)
+
+func (p *Pool) Submit(job Job) error {
+	stopped := p.stopped.Load()
+
+	if stopped {
+		return ErrPoolStopped
+	}
+
+	select {
+	case p.jobs <- job:
+		return nil
+	case <-p.ctx.Done():
+		return ErrPoolStopped
+	}
+}
+
+func (p *Pool) TrySubmit(job Job) error {
+	stopped := p.stopped.Load()
+
+	if stopped {
+		return ErrPoolStopped
+	}
+	select {
+	case p.jobs <- job:
+		return nil
+	default:
+		return ErrPoolFull
+	}
+}
+
+func (p *Pool) Result() <-chan Result {
+	return p.results
+}
+
+func (p *Pool) Shutdown() {
+	stopped := p.stopped.Load()
+	if stopped == true {
+		return
+	}
+	p.stopped.Store(true)
+
+	close(p.jobs)    // close jobs channel so no more writed
+	p.wg.Wait()      // wait for all jobs to finish
+	p.cancel()       //cancel context
+	close(p.results) //close results channel
 }
