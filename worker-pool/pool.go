@@ -128,7 +128,7 @@ func (p *Pool) Submit(job Job) error {
 	}
 }
 
-func (p *Pool) TrySubmit(job Job) error {
+func (p *Pool) TrySubmit(job Job) error { //for fast operations, using default in select
 	stopped := p.stopped.Load()
 
 	if stopped {
@@ -153,7 +153,7 @@ func (p *Pool) Shutdown() {
 	}
 	p.stopped.Store(true)
 
-	close(p.jobs)    // close jobs channel so no more writed
+	close(p.jobs)    // close jobs channel so no more writes
 	p.wg.Wait()      // wait for all jobs to finish
 	p.cancel()       //cancel context
 	close(p.results) //close results channel
