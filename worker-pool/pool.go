@@ -24,9 +24,13 @@ type Result struct {
 }
 
 type Config struct {
-	Workers    int
-	QueueSize  int
-	JobTimeout time.Duration
+	MinWorkers    int
+	MaxWorkers    int
+	Workers       int
+	QueueSize     int
+	JobTimeout    time.Duration
+	ScaleInterval time.Duration
+	IdleTimeout   time.Duration
 }
 
 type Pool struct {
@@ -38,7 +42,8 @@ type Pool struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	stopped atomic.Bool
+	stopped       atomic.Bool
+	activeWorkers int64
 }
 
 func NewPool(cfg Config) *Pool {
@@ -161,4 +166,30 @@ func (p *Pool) Shutdown() {
 	p.wg.Wait()      // wait for all jobs to finish
 	p.cancel()       //cancel context
 	close(p.results) //close results channel
+}
+
+func (p *Pool) spawnWorker() {
+	atomic.AddInt64(&p.activeWorkers, 1)
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		defer atomic.AddInt64(&p.activeWorkers, -1)
+
+		idleTimer := time.NewTimer(p.cfg.IdleTimeout)
+		for {
+			select {
+			case job, ok := <-p.jobs:
+				if !ok {
+					return
+				}
+				idleTimer.Reset(p.cfg.IdleTimeout)
+				p.RunJob(job)
+
+			case <-idleTimer.C:
+
+			}
+
+		}
+
+	}()
 }
