@@ -186,10 +186,37 @@ func (p *Pool) spawnWorker() {
 				p.RunJob(job)
 
 			case <-idleTimer.C:
-
+				if atomic.LoadInt64(&p.activeWorkers) > int64(p.cfg.MinWorkers) {
+					return
+				}
+				idleTimer.Reset(p.cfg.IdleTimeout)
+			case <-p.ctx.Done():
+				return
 			}
-
 		}
-
 	}()
+}
+
+func (p *Pool) autoScale() {
+	ticker := time.NewTicker(p.cfg.ScaleInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			queueDepth := len(p.jobs)
+			threshold := p.cfg.QueueSize / 2
+			activeWorkers := atomic.LoadInt64(&p.activeWorkers)
+
+			if queueDepth > threshold && activeWorkers < int64(p.cfg.MaxWorkers) {
+				needed := min(p.cfg.MaxWorkers-int(activeWorkers), (queueDepth-threshold)/10+1)
+
+				for i := 0; i < needed; i++ {
+					p.spawnWorker()
+				}
+			}
+		case <-p.ctx.Done():
+			return
+		}
+	}
+
 }
