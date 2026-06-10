@@ -56,10 +56,11 @@ func NewPool(cfg Config) *Pool {
 		cancel:  cancel,
 	}
 
-	for i := 0; i < cfg.Workers; i++ {
-		pool.wg.Add(1)
-		go pool.Worker()
+	for i := 0; i < cfg.MinWorkers; i++ {
+		pool.spawnWorker()
 	}
+
+	go pool.autoScale()
 
 	return pool
 }

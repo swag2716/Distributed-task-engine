@@ -12,9 +12,12 @@ func main() {
 	fmt.Println("starting pool engine")
 	p := pool.NewPool(
 		pool.Config{
-			Workers:    3,
-			QueueSize:  20,
-			JobTimeout: 5 * time.Second,
+			MinWorkers:    3,
+			MaxWorkers:    5,
+			Workers:       3,
+			QueueSize:     20,
+			JobTimeout:    5 * time.Second,
+			ScaleInterval: 5 * time.Second,
 		},
 	)
 
