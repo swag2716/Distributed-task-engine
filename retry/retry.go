@@ -12,15 +12,16 @@ type Policy struct {
 	BaseDelay   time.Duration
 	MaxDelay    time.Duration
 	Multiplier  float64
-	Jitter      int
+	Jitter      float64
 }
 
-func wrap(task func(ctx context.Context, payload any) (any, error), policy Policy) func(ctx context.Context, payload any) (any, error) {
+func Wrap(task func(ctx context.Context, payload any) (any, error), policy Policy) func(ctx context.Context, payload any) (any, error) {
 	return func(ctx context.Context, payload any) (any, error) {
 		delay := policy.BaseDelay
 		var err error
+		var result any
 		for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
-			result, err := task(ctx, payload)
+			result, err = task(ctx, payload)
 			if err == nil {
 				return result, nil
 			}
