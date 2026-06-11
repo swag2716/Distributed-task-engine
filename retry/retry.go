@@ -3,7 +3,6 @@ package retry
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/rand"
 	"time"
 )
@@ -20,8 +19,9 @@ func Wrap(task func(ctx context.Context, payload any) (any, error), policy Polic
 	return func(ctx context.Context, payload any) (any, error) {
 		delay := policy.BaseDelay
 		var err error
+		var result any
 		for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
-			result, err := task(ctx, payload)
+			result, err = task(ctx, payload)
 			if err == nil {
 				return result, nil
 			}
@@ -31,7 +31,6 @@ func Wrap(task func(ctx context.Context, payload any) (any, error), policy Polic
 			}
 
 			if attempt == policy.MaxAttempts {
-				fmt.Println(payload, "task cant be completed")
 				break
 			}
 			noise := float64(delay) * float64(policy.Jitter) * (rand.Float64()*2 - 1)

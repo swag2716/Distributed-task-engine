@@ -6,12 +6,15 @@ import (
 	"net/http"
 	"time"
 
+	localserver "github.com/swag2716/distributed-task-engine/localServer"
 	"github.com/swag2716/distributed-task-engine/retry"
 	pool "github.com/swag2716/distributed-task-engine/worker-pool"
 )
 
 func main() {
 	fmt.Println("starting pool engine")
+	server := localserver.SpinLocalServer()
+	defer server.Close()
 	p := pool.NewPool(
 		pool.Config{
 			MinWorkers:    3,
@@ -42,32 +45,38 @@ func main() {
 		Multiplier:  2.0,
 		Jitter:      0.2,
 	}
-	urls := []string{
-		"https://httpbin.org/status/200",
-		"https://httpbin.org/status/500", // will fail and retry
-		"https://httpbin.org/status/200",
-	}
-	for i, url := range urls {
-		task := func(ctx context.Context, payload any) (any, error) {
-			u := payload.(string)
 
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-			if err != nil {
-				return nil, err
-			}
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				return nil, err
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode >= 500 {
-				return nil, fmt.Errorf("server error: %d", resp.StatusCode)
-			}
-			return resp.StatusCode, nil
+	task := func(ctx context.Context, payload any) (any, error) {
+		u := payload.(string)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
 		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 500 {
+			return nil, fmt.Errorf("server error: %d", resp.StatusCode)
+		}
+		return resp.StatusCode, nil
+	}
+
+	jobs := []struct {
+		id  string
+		url string
+	}{
+		{"success", server.URL + "/success"}, // succeeds immediately
+		{"fail", server.URL + "/fail"},       // fails all 3 retries
+		{"flaky", server.URL + "/flaky"},     // fails twice, succeeds third
+	}
+
+	for _, j := range jobs {
 		p.Submit(pool.Job{
-			Id:      fmt.Sprintf("url %d", i),
-			Payload: url,
+			Id:      j.id,
+			Payload: j.url,
 			Task:    retry.Wrap(task, policy),
 		})
 	}
